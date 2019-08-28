@@ -54,6 +54,7 @@ defmodule Tentacat do
       `:stream` will return a `Stream`, prepopulated with the first page.
       `:manual` will return a 3 element tuple of `{page_body, url_for_next_page, auth_credentials}`,
       which will allow you to control the paging yourself.
+    * `:etag` - ETag header used.
   """
   @spec get(binary, Client.t()) :: response
   @spec get(binary, Client.t(), keyword) :: response
@@ -65,12 +66,14 @@ defmodule Tentacat do
       |> url(path)
       |> add_params_to_url(params)
 
+    headers = etag(options)
+
     case pagination(options) do
       nil -> request_stream(:get, url, client.auth)
       :none -> request_stream(:get, url, client.auth, "", :one_page)
       :auto -> request_stream(:get, url, client.auth)
       :stream -> request_stream(:get, url, client.auth, "", :stream)
-      :manual -> request_with_pagination(:get, url, client.auth)
+      :manual -> request_with_pagination(:get, url, client.auth, "", headers)
     end
   end
 
@@ -99,6 +102,14 @@ defmodule Tentacat do
   @spec pagination(keyword) :: atom | nil
   defp pagination(options) do
     Keyword.get(options, :pagination, Application.get_env(:tentacat, :pagination, nil))
+  end
+
+  @spec etag(keyword) :: list
+  defp etag(options) do
+    case Keyword.get(options, :etag, nil) do
+      nil -> []
+      etag -> [{"If-None-Match", "\"#{etag}\""}]
+    end
   end
 
   def raw_request(method, url, body \\ "", headers \\ [], options \\ []) do
@@ -144,14 +155,14 @@ defmodule Tentacat do
     {[item], {[], next, auth}}
   end
 
-  @spec request_with_pagination(atom, binary, Client.auth(), any) :: pagination_response
-  def request_with_pagination(method, url, auth, body \\ "") do
+  @spec request_with_pagination(atom, binary, Client.auth(), any, any) :: pagination_response
+  def request_with_pagination(method, url, auth, body \\ "", headers \\ []) do
     resp =
       request!(
         method,
         url,
         JSX.encode!(body),
-        authorization_header(auth, extra_headers() ++ @user_agent),
+        authorization_header(auth, extra_headers() ++ @user_agent ++ headers),
         extra_options()
       )
 
